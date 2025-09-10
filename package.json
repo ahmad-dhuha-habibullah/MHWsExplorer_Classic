@@ -1,0 +1,14 @@
+{
+  "name": "mhws-explorer-classic",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Automated updater for current_sst.csv via GitHub Actions",
+  "type": "module",
+  "scripts": {
+    "update:sst": "node scripts/update-sst.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.7"
+  }
+}
+

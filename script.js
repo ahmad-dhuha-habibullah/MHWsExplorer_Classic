@@ -182,6 +182,22 @@ class MarineHeatwaveExplorer {
                 document.querySelector(`.tab-btn[data-tab="${target}"]`)?.click();
             });
         });
+
+        // Click brand to go Home (and refresh view)
+        const brand = document.getElementById('brand-home');
+        if (brand) {
+            brand.addEventListener('click', () => {
+                const homeBtn = document.querySelector('.tab-btn[data-tab="tab-home"]');
+                if (homeBtn) {
+                    // Activate Home tab
+                    homeBtn.click();
+                }
+                // Optionally refresh bulletin/status
+                this.updateBulletin();
+                this.updateStatus('Ready');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+        }
     }
 
     setupDateInputs() {

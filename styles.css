@@ -13,9 +13,9 @@ body {
 }
 
 .container {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 20px;
+    max-width: none;
+    margin: 0;
+    padding: 0;
 }
 
 /* Header */
@@ -28,7 +28,7 @@ body {
     position: sticky; top: 0; z-index: 2000;
 }
 .nav-left { display:flex; flex-direction:column; }
-.brand { font-size:1.1rem; font-weight:800; letter-spacing:0.2px; color:#0e7490; }
+.brand { font-size:1.1rem; font-weight:800; letter-spacing:0.2px; color:#0e7490; cursor:pointer; }
 .brand-sub { font-size:0.8rem; opacity:0.7; }
 .nav-center { flex:1; display:flex; justify-content:center; }
 .nav-right { display:flex; gap:8px; align-items:center; }
