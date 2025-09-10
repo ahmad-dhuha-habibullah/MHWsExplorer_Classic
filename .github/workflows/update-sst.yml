@@ -1,6 +1,8 @@
 name: Update current_sst.csv
 
 on:
+  push:
+    branches: [ "main", "master" ]
   schedule:
     # Runs every day at 02:30 UTC (adjust as needed)
     - cron: '30 2 * * *'
