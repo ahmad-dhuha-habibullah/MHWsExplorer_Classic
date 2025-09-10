@@ -41,40 +41,149 @@
         <!-- Landing / Home -->
         <section id="tab-home" class="tab-panel active">
             <div class="hero">
-                <h1>Discover Marine Heatwaves</h1>
-                <p>Explore sea surface temperature, detect events, and monitor Bali’s coastal waters.</p>
+                <h1>Mitigating Marine Heatwaves: Early Detection and Alert System for Sustainable Aquaculture in Southern Bali</h1>
+                <p>We operate a real-time monitoring and alerting network that protects keramba, seaweed, and pearl farms with timely MHW detection and guidance.</p>
                 <div class="hero-actions">
-                    <button class="btn primary" data-tab-jump="tab-chart">Open Chart</button>
+                    <button class="btn primary" data-tab-jump="tab-chart">View Timeseries</button>
                     <button class="btn" data-tab-jump="tab-map">Open Map</button>
                 </div>
             </div>
-        </section>
 
-        <!-- Chart Panel -->
-        <div id="tab-chart" class="tab-panel chart-section" style="display:none;">
-            <div class="chart-container">
-                <canvas id="heatwave-chart"></canvas>
-                <div class="chart-actions">
-                    <button id="btn-expand" class="btn small">Expand</button>
-                    <button id="btn-download" class="btn small">Download PNG</button>
+            <div class="card" style="margin-top:14px">
+                <h2 style="margin-bottom:8px">Marine Heatwave Bulletin</h2>
+                <p class="small-note">Live status across monitored sites. Updated as new data arrive.</p>
+                <div id="mhw-bulletin" class="mhw-bulletin">
+                    <div class="mhw-card" style="--accent:#0ea5e9">
+                        <div class="mhw-card-header">
+                            <h3>Jimbaran</h3>
+                            <span id="chip-jimbaran" class="mhw-chip">—</span>
+                        </div>
+                        <div class="mhw-anomaly" id="anom-jimbaran">—</div>
+                        <div class="mhw-meta" id="meta-jimbaran"></div>
+                        <div class="mhw-actions"><button class="btn small" data-browse-loc="jimbaran">Open chart</button></div>
+                    </div>
+                    <div class="mhw-card" style="--accent:#22c55e">
+                        <div class="mhw-card-header">
+                            <h3>Nusa Dua</h3>
+                            <span id="chip-nusadua" class="mhw-chip">—</span>
+                        </div>
+                        <div class="mhw-anomaly" id="anom-nusadua">—</div>
+                        <div class="mhw-meta" id="meta-nusadua"></div>
+                        <div class="mhw-actions"><button class="btn small" data-browse-loc="nusadua">Open chart</button></div>
+                    </div>
+                    <div class="mhw-card" style="--accent:#f97316">
+                        <div class="mhw-card-header">
+                            <h3>Sanur</h3>
+                            <span id="chip-sanur" class="mhw-chip">—</span>
+                        </div>
+                        <div class="mhw-anomaly" id="anom-sanur">—</div>
+                        <div class="mhw-meta" id="meta-sanur"></div>
+                        <div class="mhw-actions"><button class="btn small" data-browse-loc="sanur">Open chart</button></div>
+                    </div>
                 </div>
             </div>
-            <div class="legend legend-inline">
-                <div class="legend-items">
-                    <div class="legend-item"><div class="legend-color" style="background-color:#0000ff"></div><span>Past SST</span></div>
-                    <div class="legend-item"><div class="legend-color dashed" style="background-color:#a0a0a0"></div><span>Forecast SST</span></div>
-                    <div class="legend-item"><div class="legend-color dashed" style="background-color:#0000ff"></div><span>Climatology</span></div>
-                    <div class="legend-item"><div class="legend-color" style="background-color:#008000"></div><span>90th Percentile</span></div>
-                    <div class="legend-item"><div class="legend-swatch" style="background:#ffb6c166"></div><span>Heat Spike</span></div>
-                    <div class="legend-item"><div class="legend-swatch" style="background:#ffff0066"></div><span>Cat I</span></div>
-                    <div class="legend-item"><div class="legend-swatch" style="background:#ffa50066"></div><span>Cat II</span></div>
-                    <div class="legend-item"><div class="legend-swatch" style="background:#ff450066"></div><span>Cat III</span></div>
-                    <div class="legend-item"><div class="legend-swatch" style="background:#8b000066"></div><span>Cat IV</span></div>
-                </div>
+
+            <div class="card" style="margin-top:14px">
+                <h2 style="margin-bottom:8px">Program Overview</h2>
+                <p>Since launch, we have deployed in-situ temperature sensors, assembled an ensemble climatology, and operationalized daily MHW detection based on the 90th percentile baseline [1]. The dashboard and alerting service notify farmers of emerging and ongoing events, supported by short‑term predictions from ML/DL models.</p>
+            </div>
+
+            <div class="card" style="margin-top:14px">
+                <h2 style="margin-bottom:8px">Background</h2>
+                <p>Marine heatwaves (MHWs) are prolonged periods of anomalously high sea temperatures exceeding the 90th percentile baseline. In Indonesia, including Southern Bali, their frequency and duration have risen. Events in 2016 and 2020 aligned with production declines of 150–300 thousand metric tons. In Pegametan Bay (340 ha aquaculture hub), SSTs up to 29.6°C during MHWs exacerbated catch declines (2012: 244,325 tonnes → 2022: 133,858 tonnes). Keramba are highly sensitive to temperature shifts. Projections indicate further intensification, with some coastal areas approaching near‑permanent MHW states by mid‑century.</p>
+            </div>
+
+            <div class="card" style="margin-top:14px">
+                <h2 style="margin-bottom:8px">Goals and Objectives</h2>
+                <p>We build long-term resilience by operating an early detection and alert system that integrates in‑situ monitoring, predictive modeling, and community engagement. The system reduces vulnerability of keramba, seaweed, and pearl farms.</p>
+                <ul style="margin-left:16px; margin-top:8px">
+                    <li>Ensemble SST and 90th‑percentile baseline established for Southern Bali [1].</li>
+                    <li>In‑situ sensors report daily averages compared to the baseline.</li>
+                    <li>ML/DL predictions complement observations for short‑term outlooks.</li>
+                    <li>Real‑time visualization and alerts operate via this web app.</li>
+                    <li>Ecological and water‑quality surveys run annually to refine adaptation.</li>
+                    <li>We train farmers and engage communities to boost adoption.</li>
+                    <li>Early warnings for temperature spikes are issued proactively.</li>
+                    <li>Open‑access data sharing supports research and policy.</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- Chart Panel (optimized for landscape) -->
+        <div id="tab-chart" class="tab-panel" style="display:none;">
+            <div class="chart-wrap">
+                <!-- Left sidebar controls -->
+                <aside class="controls-panel compact chart-sidebar" id="controls-panel">
+                    <div class="control-group">
+                        <label for="location-select">Location:</label>
+                        <select id="location-select">
+                            <option value="jimbaran">Jimbaran</option>
+                            <option value="nusadua">Nusa Dua</option>
+                            <option value="sanur">Sanur</option>
+                        </select>
+                    </div>
+
+                    <div class="control-group">
+                        <label for="start-date">Start Date:</label>
+                        <input type="date" id="start-date">
+                    </div>
+
+                    <div class="control-group">
+                        <label for="end-date">End Date:</label>
+                        <input type="date" id="end-date">
+                    </div>
+
+                    <div class="control-group">
+                        <button id="apply-dates" class="btn">Apply Date Range</button>
+                    </div>
+
+                    <div class="control-group">
+                        <label for="y-min">Y-axis Min (°C):</label>
+                        <input type="number" id="y-min" value="25" step="0.1">
+                    </div>
+
+                    <div class="control-group">
+                        <label for="y-max">Y-axis Max (°C):</label>
+                        <input type="number" id="y-max" value="32" step="0.1">
+                    </div>
+
+                    <div class="control-group">
+                        <button id="apply-y-axis" class="btn">Apply Y-axis</button>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <div class="muted small-note">Tips: Select a wide date range to review multi-month events. Adjust Y-axis to emphasize anomalies.</div>
+                </aside>
+
+                <!-- Main chart area -->
+                <section class="chart-main">
+                    <div class="legend legend-inline sticky-legend" style="margin-bottom:8px;">
+                        <div class="legend-items">
+                            <div class="legend-item"><div class="legend-color" style="background-color:#0000ff"></div><span>Past SST</span></div>
+                            <div class="legend-item"><div class="legend-color dashed" style="background-color:#a0a0a0"></div><span>Forecast SST</span></div>
+                            <div class="legend-item"><div class="legend-color dashed" style="background-color:#0000ff"></div><span>Climatology</span></div>
+                            <div class="legend-item"><div class="legend-color" style="background-color:#008000"></div><span>90th Percentile</span></div>
+                            <div class="legend-item"><div class="legend-swatch" style="background:#ffb6c166"></div><span>Heat Spike</span></div>
+                            <div class="legend-item"><div class="legend-swatch" style="background:#ffff0066"></div><span>Cat I</span></div>
+                            <div class="legend-item"><div class="legend-swatch" style="background:#ffa50066"></div><span>Cat II</span></div>
+                            <div class="legend-item"><div class="legend-swatch" style="background:#ff450066"></div><span>Cat III</span></div>
+                            <div class="legend-item"><div class="legend-swatch" style="background:#8b000066"></div><span>Cat IV</span></div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="heatwave-chart"></canvas>
+                        <div class="chart-actions">
+                            <button id="btn-expand" class="btn small">Expand</button>
+                            <button id="btn-download" class="btn small">Download PNG</button>
+                        </div>
+                    </div>
+                </section>
             </div>
         </div>
 
-        <div class="controls-panel compact" id="controls-panel">
+        <!-- (controls duplicated were moved into sidebar above) -->
+        <div class="controls-panel compact" id="controls-panel" style="display:none;">
             <div class="control-group">
                 <label for="location-select">Location:</label>
                 <select id="location-select">
@@ -123,11 +232,12 @@
         <!-- About Panel -->
         <section id="tab-about" class="tab-panel" style="display:none;">
             <div class="card">
-                <h2>About this project</h2>
-                <p>This tool visualizes daily sea surface temperature (SST) and detects Marine Heatwaves (MHWs) for Jimbaran, Nusa Dua, and Sanur.
-                Data are aggregated to daily means; MHWs follow the 90th percentile threshold method.</p>
-                <p>Baseline derived from long-term climatology (clim, p90). Current observations are archived to a CSV and used for charting.
-                Built with Chart.js, Leaflet, PapaParse, and Open‑Meteo Marine API.</p>
+                <h2>Background</h2>
+                <p>MHWs disrupt ecosystems and aquaculture across Indonesia. Traditional monitoring and coarse satellite data are insufficient for local decision-making. Integrating IoT sensors and predictive models can boost productivity by 20–30% via timely interventions. Aquaculture supports >12 million jobs and over 40% of Indonesia’s fish supply—action is critical.</p>
+            </div>
+            <div class="card" style="margin-top:14px">
+                <h2>Our Team & Approach</h2>
+                <p>We combine oceanography, data science, and community engagement to monitor, predict, and communicate MHW risks. In Bali, we focus on keramba, seaweed, and pearl farms. With support, we’ll co-design solutions with local communities to strengthen resilience to extreme ocean events.</p>
             </div>
         </section>
 

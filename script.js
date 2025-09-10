@@ -63,7 +63,10 @@ class MarineHeatwaveExplorer {
                 this.currentLocation = key;
                 const select = document.getElementById('location-select');
                 if (select) select.value = key;
-                this.updateChart();
+                this.waitForChartJS().then(() => {
+                    this.updateChart();
+                    this.openModal();
+                });
             });
             marker.addTo(featureGroup);
         };
@@ -71,10 +74,32 @@ class MarineHeatwaveExplorer {
         addMarker('nusadua');
         addMarker('sanur');
         featureGroup.addTo(this.map);
+        this._mapGroup = featureGroup;
 
-        // Center on Nusa Dua by default
-        const nusaDua = this.locations.nusadua;
-        this.map.setView([nusaDua.lat, nusaDua.lon], 11);
+        // Fit map to all markers (spreaded location position)
+        this.fitMapToMarkers();
+
+        // Recenter on resize
+        window.addEventListener('resize', () => {
+            if (this.map) {
+                setTimeout(() => {
+                    this.map.invalidateSize();
+                    this.fitMapToMarkers();
+                }, 100);
+            }
+        });
+    }
+
+    fitMapToMarkers() {
+        if (!this.map || !this._mapGroup) return;
+        const bounds = this._mapGroup.getBounds();
+        if (bounds && bounds.isValid()) {
+            this.map.fitBounds(bounds, { padding: [20, 20] });
+        } else {
+            // Fallback center to Nusa Dua
+            const n = this.locations.nusadua;
+            this.map.setView([n.lat, n.lon], 11);
+        }
     }
 
     setupEventListeners() {
@@ -131,6 +156,10 @@ class MarineHeatwaveExplorer {
                 const target = btn.getAttribute('data-tab');
                 document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
                 document.getElementById(target).style.display = 'block';
+                if (target === 'tab-home') this.updateBulletin();
+                if (target === 'tab-map') {
+                    setTimeout(() => { if (this.map) { this.map.invalidateSize(); this.fitMapToMarkers(); } }, 200);
+                }
             });
         });
 
@@ -196,6 +225,7 @@ class MarineHeatwaveExplorer {
             // Immediately render from the archived CSV
             await this.waitForChartJS();
             this.updateChart();
+            this.updateBulletin();
 
             // Always allow manual update via button; auto-update only if desired.
         } catch (error) {
@@ -252,7 +282,7 @@ class MarineHeatwaveExplorer {
                         complete: (results) => {
                             try {
                                 this.archivedSSTData = this.convertCSVToArchivedData(results.data);
-                                this.updateStatus('Archived SST data loaded from CSV', 'success');
+                                this.updateStatus('SST archive loaded', 'success');
                                 resolve();
                             } catch (e) {
                                 reject(e);
@@ -516,19 +546,40 @@ class MarineHeatwaveExplorer {
         return Math.floor(diff / oneDay);
     }
 
+    isLeapYear(y) {
+        return (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
+    }
+
+    getAdjustedDoy(dateString) {
+        const d = new Date(dateString);
+        const doy = this.getDayOfYear(dateString);
+        const feb28 = new Date(d.getFullYear(), 1, 28);
+        if (this.isLeapYear(d.getFullYear()) && d > feb28) return doy - 1;
+        return doy;
+    }
+
     getBaselineForDate(dateString, locationKey) {
         if (!this.baselineData) return { clim: null, p90: null };
-        
-        const dayOfYear = this.getDayOfYear(dateString);
-        const baselineRow = this.baselineData.find(row => 
-            parseInt(row['day of year']) === dayOfYear
-        );
-        
+        const dayOfYear = this.getAdjustedDoy(dateString);
+        const baselineRow = this.baselineData.find(row => {
+            const key = row['day of year'] !== undefined ? 'day of year' : (row['day_of_year'] !== undefined ? 'day_of_year' : null);
+            if (!key) return false;
+            return parseInt(row[key]) === dayOfYear;
+        });
         if (!baselineRow) return { clim: null, p90: null };
-        
+        const hasGeneric = baselineRow['climatology_mean'] !== undefined || baselineRow['percentile_90'] !== undefined;
+        const sigma = baselineRow['sigma'] !== undefined ? parseFloat(baselineRow['sigma']) : null;
+        if (hasGeneric) {
+            return {
+                clim: parseFloat(baselineRow['climatology_mean'] ?? null),
+                p90: parseFloat(baselineRow['percentile_90'] ?? null),
+                sigma
+            };
+        }
         return {
             clim: parseFloat(baselineRow[`${locationKey}_clim`]),
-            p90: parseFloat(baselineRow[`${locationKey}_p90`])
+            p90: parseFloat(baselineRow[`${locationKey}_p90`]),
+            sigma
         };
     }
 
@@ -643,62 +694,76 @@ class MarineHeatwaveExplorer {
     }
 
     detectMarineHeatwavesFromData(dates, sstValues, baselineData) {
-        const heatwaves = [];
-        let currentHeatwave = null;
+        const events = [];
+        let inEvent = false;
+        let current = [];
+        const dateToMeta = new Map();
+
+        const classifyEvent = (ev) => {
+            const anomalies = ev.map(r => r.anomaly);
+            const maxAnomaly = Math.max(...anomalies);
+            const minAnomaly = Math.min(...anomalies);
+            const meanAnomaly = anomalies.reduce((a,b)=>a+b,0) / ev.length;
+            const cumAnomaly = anomalies.reduce((a,b)=>a+b,0);
+            // Event category based on max of per-day delta categories within the event
+            const eventCategory = ev.reduce((m, r) => Math.max(m, r.deltaCategory), 0);
+            return { start: ev[0].date, end: ev[ev.length-1].date, duration: ev.length, maxAnomaly, minAnomaly, meanAnomaly, cumAnomaly, category: eventCategory };
+        };
 
         for (let i = 0; i < dates.length; i++) {
             const date = dates[i];
             const sst = sstValues[i];
             const baseline = baselineData[i];
-            
-            if (sst === null || !baseline.clim || !baseline.p90) {
-                if (currentHeatwave && currentHeatwave.dates.length >= 5) {
-                    heatwaves.push(currentHeatwave);
+            if (sst === null || !baseline || baseline.p90 == null) {
+                if (inEvent && current.length >= 5) {
+                    const ev = classifyEvent(current);
+                    events.push(ev);
+                    current.forEach(r => dateToMeta.set(r.date, { anomaly: r.anomaly, category: r.deltaCategory, threshold: r.threshold, clim: r.clim }));
                 }
-                currentHeatwave = null;
+                inEvent = false; current = [];
                 continue;
             }
-
-            const isHeatwave = sst > baseline.p90;
-
-            if (isHeatwave) {
-                if (!currentHeatwave) {
-                    currentHeatwave = {
-                        startDate: date,
-                        peakDate: date,
-                        peakTemp: sst,
-                        maxIntensity: sst - baseline.p90,
-                        category: this.getHeatwaveCategory(sst - baseline.p90),
-                        dates: [date],
-                        temps: [sst],
-                        baselines: [baseline]
-                    };
-                } else {
-                    currentHeatwave.dates.push(date);
-                    currentHeatwave.temps.push(sst);
-                    currentHeatwave.baselines.push(baseline);
-                    
-                    if (sst > currentHeatwave.peakTemp) {
-                        currentHeatwave.peakDate = date;
-                        currentHeatwave.peakTemp = sst;
-                        currentHeatwave.maxIntensity = sst - baseline.p90;
-                        currentHeatwave.category = this.getHeatwaveCategory(sst - baseline.p90);
-                    }
+            const threshold = baseline.p90;
+            const clim = baseline.clim;
+            const anomaly = sst - threshold;
+            if (anomaly > 0) {
+                // Delta-based category per day
+                const delta = (threshold != null && clim != null) ? (threshold - clim) : null;
+                const excess = (threshold != null) ? (sst - threshold) : null;
+                let deltaCategory = 0;
+                if (delta != null && excess != null) {
+                    if (excess > 0 && excess < 1*delta) deltaCategory = 1;
+                    else if (excess >= 1*delta && excess < 2*delta) deltaCategory = 2;
+                    else if (excess >= 2*delta && excess < 3*delta) deltaCategory = 3;
+                    else if (excess >= 3*delta) deltaCategory = 4;
                 }
+                current.push({ date, sst, anomaly, threshold, clim, deltaCategory });
+                inEvent = true;
             } else {
-                if (currentHeatwave && currentHeatwave.dates.length >= 5) {
-                    heatwaves.push(currentHeatwave);
+                if (inEvent && current.length >= 5) {
+                    const ev = classifyEvent(current);
+                    events.push(ev);
+                    current.forEach(r => dateToMeta.set(r.date, { anomaly: r.anomaly, category: r.deltaCategory, threshold: r.threshold, clim: r.clim }));
                 }
-                currentHeatwave = null;
+                inEvent = false; current = [];
             }
         }
-
-        // Add the last heatwave if it exists
-        if (currentHeatwave && currentHeatwave.dates.length >= 5) {
-            heatwaves.push(currentHeatwave);
+        if (inEvent && current.length >= 5) {
+            const ev = classifyEvent(current);
+            events.push(ev);
+            current.forEach(r => dateToMeta.set(r.date, { anomaly: r.anomaly, category: r.deltaCategory, threshold: r.threshold, clim: r.clim }));
         }
+        return { events, dateToMeta };
+    }
 
-        return heatwaves;
+    getHeatwaveCategoryLabel(catNum) {
+        switch (catNum) {
+            case 1: return 'Category I';
+            case 2: return 'Category II';
+            case 3: return 'Category III';
+            case 4: return 'Category IV';
+            default: return 'Heat Spike';
+        }
     }
 
     updateChart() {
@@ -737,25 +802,26 @@ class MarineHeatwaveExplorer {
         const availableData = sstValues.filter(val => val !== null).length;
         console.log(`Chart update: ${allDates.length} total dates, ${availableData} with data`);
 
-        // Detect heatwaves using the filtered data (kept for metadata)
-        const heatwaves = this.detectMarineHeatwavesFromData(allDates, sstValues, baselineData);
+        // Detect events and per-date metadata
+        const { events, dateToMeta } = this.detectMarineHeatwavesFromData(allDates, sstValues, baselineData);
+        // Persist context for reuse in modal tooltips
+        this._tooltipContext = { events, dateToMeta };
+
+        // Today reference (used for past/forecast split and vertical line)
+        const nowDate = this.currentDate.toISOString().split('T')[0];
 
         // Build per-date category map for shading bands based on simple exceedance of p90
         const dateToCategory = new Map();
         for (let i = 0; i < allDates.length; i++) {
             const d = allDates[i];
-            const sst = sstValues[i];
-            const bl = baselineData[i];
-            if (sst == null || !bl || bl.p90 == null) continue;
-            const intensity = sst - bl.p90;
-            if (intensity > 0) {
-                dateToCategory.set(d, this.getHeatwaveCategory(intensity));
+            const meta = dateToMeta.get(d);
+            if (meta) {
+                dateToCategory.set(d, this.getHeatwaveCategoryLabel(meta.category));
             }
         }
 
-        // Prepare category datasets arrays aligned to allDates
+        // Prepare category datasets arrays aligned to allDates (Category I–IV only)
         const catSeries = {
-            'Heat Spike': new Array(allDates.length).fill(null),
             'Category I': new Array(allDates.length).fill(null),
             'Category II': new Array(allDates.length).fill(null),
             'Category III': new Array(allDates.length).fill(null),
@@ -764,35 +830,32 @@ class MarineHeatwaveExplorer {
         for (let i = 0; i < allDates.length; i++) {
             const d = allDates[i];
             const cat = dateToCategory.get(d);
-            if (cat && sstValues[i] != null) {
+            if (cat && sstValues[i] != null && catSeries[cat]) {
                 catSeries[cat][i] = sstValues[i];
             }
         }
 
         // Prepare chart data
         const datasets = [
-            // Past SST data (solid blue line)
+            // SST data (solid black line) up to and including today
             {
-                label: 'Past SST',
-                data: allDates.map((date, index) => ({
-                    x: date,
-                    y: sstValues[index]
-                })).filter(point => point.y !== null),
-                borderColor: '#0000ff',
+                label: 'SST',
+                data: allDates.map((date, index) => ({ x: date, y: (date <= nowDate ? sstValues[index] : null) }))
+                               .filter(point => point.y !== null),
+                borderColor: '#000000',
                 backgroundColor: 'transparent',
-                borderWidth: 2,
+                borderWidth: 1.5,
                 tension: 0.35,
                 pointRadius: 0,
                 pointHoverRadius: 4,
+                pointStyle: 'line',
                 order: 10
             },
-            // Forecast SST data (dashed line) - same data but different styling
+            // Forecast SST data (dashed line) only after today
             {
                 label: 'Forecast SST',
-                data: allDates.map((date, index) => ({
-                    x: date,
-                    y: sstValues[index]
-                })).filter(point => point.y !== null),
+                data: allDates.map((date, index) => ({ x: date, y: (date > nowDate ? sstValues[index] : null) }))
+                               .filter(point => point.y !== null),
                 borderColor: '#a0a0a0',
                 backgroundColor: 'transparent',
                 borderWidth: 1,
@@ -800,6 +863,7 @@ class MarineHeatwaveExplorer {
                 tension: 0.4,
                 pointRadius: 0,
                 pointHoverRadius: 4,
+                pointStyle: 'line',
                 order: 9
             },
             // Climatological mean (dashed blue line)
@@ -815,6 +879,7 @@ class MarineHeatwaveExplorer {
                 borderDash: [5, 5],
                 pointRadius: 0,
                 pointHoverRadius: 4,
+                pointStyle: 'line',
                 order: 8
             },
             // 90th percentile threshold (solid green line)
@@ -829,21 +894,10 @@ class MarineHeatwaveExplorer {
                 borderWidth: 2,
                 pointRadius: 0,
                 pointHoverRadius: 4,
+                pointStyle: 'line',
                 order: 7
             },
             // Heatwave shaded fills per category (each fills to previous dataset = p90)
-            {
-                label: 'Heat Spike',
-                data: allDates.map((date, i) => ({ x: date, y: catSeries['Heat Spike'][i] })),
-                borderWidth: 0,
-                showLine: true,
-                spanGaps: false,
-                pointRadius: 0,
-                borderColor: 'transparent',
-                backgroundColor: this.hexToRgba('#ffb6c1', 0.6),
-                fill: '-1',
-                order: -10
-            },
             {
                 label: 'Category I',
                 data: allDates.map((date, i) => ({ x: date, y: catSeries['Category I'][i] })),
@@ -852,8 +906,9 @@ class MarineHeatwaveExplorer {
                 spanGaps: false,
                 pointRadius: 0,
                 borderColor: 'transparent',
-                backgroundColor: this.hexToRgba('#ffff00', 0.5),
-                fill: '-1',
+                backgroundColor: this.hexToRgba('#ffd39b', 0.6),
+                fill: 3,
+                pointStyle: 'rect',
                 order: -10
             },
             {
@@ -864,8 +919,9 @@ class MarineHeatwaveExplorer {
                 spanGaps: false,
                 pointRadius: 0,
                 borderColor: 'transparent',
-                backgroundColor: this.hexToRgba('#ffa500', 0.5),
-                fill: '-1',
+                backgroundColor: this.hexToRgba('#ffa64d', 0.55),
+                fill: 3,
+                pointStyle: 'rect',
                 order: -10
             },
             {
@@ -876,8 +932,9 @@ class MarineHeatwaveExplorer {
                 spanGaps: false,
                 pointRadius: 0,
                 borderColor: 'transparent',
-                backgroundColor: this.hexToRgba('#ff4500', 0.5),
-                fill: '-1',
+                backgroundColor: this.hexToRgba('#ff6347', 0.55),
+                fill: 3,
+                pointStyle: 'rect',
                 order: -10
             },
             {
@@ -888,15 +945,15 @@ class MarineHeatwaveExplorer {
                 spanGaps: false,
                 pointRadius: 0,
                 borderColor: 'transparent',
-                backgroundColor: this.hexToRgba('#8b0000', 0.5),
-                fill: '-1',
+                backgroundColor: this.hexToRgba('#8b0000', 0.55),
+                fill: 3,
+                pointStyle: 'rect',
                 order: -10
             }
         ];
 
 
         // Add "now" vertical line
-        const nowDate = this.currentDate.toISOString().split('T')[0];
         if (nowDate >= startDate && nowDate <= endDate) {
             datasets.push({
                 label: 'Now',
@@ -954,39 +1011,70 @@ class MarineHeatwaveExplorer {
                 },
                 plugins: {
                     legend: {
-                        display: false // inline legend above
+                        display: true,
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true
+                        }
                     },
                     tooltip: {
+                        usePointStyle: true,
                         callbacks: {
-                            title: (context) => {
-                                return new Date(context[0].parsed.x).toLocaleDateString();
-                            },
+                            title: (context) => new Date(context[0].parsed.x).toLocaleDateString(),
                             label: (context) => {
                                 const dsLabel = context.dataset.label || '';
                                 const y = context.parsed.y;
                                 const x = context.parsed.x;
-                                let parts = [];
-                                parts.push(`${dsLabel}: ${y != null ? y.toFixed(2) : '—'}°C`);
-                                // Add MHW info if applicable
+                                return `${dsLabel}: ${y != null ? y.toFixed(2) : '—'}°C`;
+                            },
+                            labelPointStyle: (context) => {
+                                const lineLabels = new Set(['SST','Forecast SST','Climatological Mean','90th Percentile','Now']);
+                                const dsLabel = context.dataset.label || '';
+                                if (lineLabels.has(dsLabel)) {
+                                    return { pointStyle: 'line', rotation: 0 };
+                                }
+                                return { pointStyle: 'rect', rotation: 0 };
+                            },
+                            afterBody: (context) => {
+                                if (!context || context.length === 0) return [];
+                                const x = context[0].parsed.x;
                                 const dateStr = new Date(x).toISOString().split('T')[0];
-                                const baseline = this.getBaselineForDate(dateStr, this.currentLocation);
-                                const sst = this.archivedSSTData[dateStr] && this.archivedSSTData[dateStr][this.currentLocation];
-                                if (baseline && baseline.p90 && sst != null) {
-                                    const intensity = sst - baseline.p90;
-                                    const isHW = intensity > 0;
-                                    if (isHW) {
-                                        const cat = this.getHeatwaveCategory(intensity);
-                                        parts.push(`MHW Intensity: ${intensity.toFixed(2)}°C`);
-                                        parts.push(`Category: ${cat}`);
+                                const meta = this._tooltipContext && this._tooltipContext.dateToMeta ? this._tooltipContext.dateToMeta.get(dateStr) : null;
+                                const events = this._tooltipContext ? this._tooltipContext.events : [];
+                                const lines = [];
+                                if (meta) {
+                                    lines.push(`Anomaly: ${meta.anomaly.toFixed(2)}°C`);
+                                    lines.push(`Category: ${this.getHeatwaveCategoryLabel(meta.category)}`);
+                                    const ev = events.find(e => dateStr >= e.start && dateStr <= e.end);
+                                    if (ev) {
+                                        lines.push(`Duration: ${ev.duration} days`);
+                                        lines.push(`Max anomaly: ${ev.maxAnomaly.toFixed(2)}°C`);
+                                        if (ev.minAnomaly !== undefined) lines.push(`Min anomaly: ${ev.minAnomaly.toFixed(2)}°C`);
+                                        lines.push(`Mean intensity: ${ev.meanAnomaly.toFixed(2)}°C`);
+                                        lines.push(`Cumulative intensity: ${ev.cumAnomaly.toFixed(2)}°C·day`);
                                     }
                                 }
-                                return parts;
+                                return lines;
+                            },
+                            itemSort: (a, b) => {
+                                const priority = (lbl) => {
+                                    if (lbl.startsWith('Category ')) return 0;
+                                    return 1;
+                                };
+                                const pa = priority(a.dataset.label || '');
+                                const pb = priority(b.dataset.label || '');
+                                if (pa !== pb) return pa - pb;
+                                return 0;
                             }
                         }
                     }
                 }
             }
         });
+
+        // Hide custom HTML legend if present (use built-in legend only)
+        const htmlLegend = document.querySelector('.legend.sticky-legend');
+        if (htmlLegend) htmlLegend.style.display = 'none';
     }
 
     hexToRgba(hex, alpha) {
@@ -1004,7 +1092,16 @@ class MarineHeatwaveExplorer {
         const modal = document.createElement('div');
         modal.id = 'chart-modal';
         modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;';
-        modal.innerHTML = '<div style="width:90vw;height:85vh;background:#fff;border-radius:10px;position:relative;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.3)"><button id="modal-close" class="btn small" style="position:absolute;top:10px;right:10px">Close</button><canvas id="modal-canvas" style="width:100%;height:100%"></canvas></div>';
+        modal.innerHTML = '<div style="width:90vw;height:85vh;background:#fff;border-radius:0;position:relative;box-shadow:0 10px 30px rgba(0,0,0,.3);display:flex;flex-direction:column">'
+            + '<div style="flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #e5e7eb">'
+            + '<div style="font-weight:600">Chart</div>'
+            + '<div>'
+            + '<button id="modal-export" class="btn small" style="margin-right:8px">Export PNG</button>'
+            + '<button id="modal-close" class="btn small">Close</button>'
+            + '</div>'
+            + '</div>'
+            + '<div style="flex:1 1 auto;padding:12px"><canvas id="modal-canvas" style="width:100%;height:100%"></canvas></div>'
+            + '</div>';
         document.body.appendChild(modal);
         document.getElementById('modal-close').onclick = () => modal.remove();
         // clone chart into modal
@@ -1012,7 +1109,63 @@ class MarineHeatwaveExplorer {
         const config = this.chart.config;
         const data = JSON.parse(JSON.stringify(config.data));
         const options = JSON.parse(JSON.stringify(config.options));
-        new Chart(ctx, { type: 'line', data, options });
+        // Reattach detailed tooltip callbacks for modal using stored context
+        options.plugins = options.plugins || {};
+        options.plugins.tooltip = options.plugins.tooltip || {};
+        options.plugins.tooltip.usePointStyle = true;
+        options.plugins.tooltip.callbacks = {
+            title: (context) => new Date(context[0].parsed.x).toLocaleDateString(),
+            label: (context) => {
+                const dsLabel = context.dataset.label || '';
+                const y = context.parsed.y;
+                return `${dsLabel}: ${y != null ? y.toFixed(2) : '—'}°C`;
+            },
+            labelPointStyle: (context) => {
+                const lineLabels = new Set(['SST','Forecast SST','Climatological Mean','90th Percentile','Now']);
+                const dsLabel = context.dataset.label || '';
+                if (lineLabels.has(dsLabel)) return { pointStyle: 'line', rotation: 0 };
+                return { pointStyle: 'rect', rotation: 0 };
+            },
+            afterBody: (context) => {
+                if (!context || context.length === 0) return [];
+                const x = context[0].parsed.x;
+                const dateStr = new Date(x).toISOString().split('T')[0];
+                const meta = this._tooltipContext && this._tooltipContext.dateToMeta ? this._tooltipContext.dateToMeta.get(dateStr) : null;
+                const events = this._tooltipContext ? this._tooltipContext.events : [];
+                const lines = [];
+                if (meta) {
+                    lines.push(`Anomaly: ${meta.anomaly.toFixed(2)}°C`);
+                    lines.push(`Category: ${this.getHeatwaveCategoryLabel(meta.category)}`);
+                    const ev = events.find(e => dateStr >= e.start && dateStr <= e.end);
+                    if (ev) {
+                        lines.push(`Duration: ${ev.duration} days`);
+                        lines.push(`Max anomaly: ${ev.maxAnomaly.toFixed(2)}°C`);
+                        if (ev.minAnomaly !== undefined) lines.push(`Min anomaly: ${ev.minAnomaly.toFixed(2)}°C`);
+                        lines.push(`Mean intensity: ${ev.meanAnomaly.toFixed(2)}°C`);
+                        lines.push(`Cumulative intensity: ${ev.cumAnomaly.toFixed(2)}°C·day`);
+                    }
+                }
+                return lines;
+            },
+            itemSort: (a, b) => {
+                const priority = (lbl) => {
+                    if (lbl.startsWith('Category ')) return 0;
+                    return 1;
+                };
+                const pa = priority(a.dataset.label || '');
+                const pb = priority(b.dataset.label || '');
+                if (pa !== pb) return pa - pb;
+                return 0;
+            }
+        };
+        const modalChart = new Chart(ctx, { type: 'line', data, options });
+        document.getElementById('modal-export').onclick = () => {
+            const url = modalChart.toBase64Image();
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'mhw_chart.png';
+            a.click();
+        };
     }
 
     downloadPNG() {
@@ -1112,6 +1265,45 @@ class MarineHeatwaveExplorer {
             const lastUpdateElement = document.getElementById('last-update');
             lastUpdateElement.textContent = `Last updated: ${new Date().toLocaleString()}`;
         }
+    }
+
+    // Bulletin generator for Home tab
+    updateBulletin() {
+        if (!this.archivedSSTData || !this.baselineData) return;
+        const locations = ['jimbaran','nusadua','sanur'];
+        const today = new Date().toISOString().split('T')[0];
+        const start = new Date(new Date(today).getFullYear(), 0, 1).toISOString().split('T')[0];
+        const dates = this.generateDateRange(start, today);
+        for (const loc of locations) {
+            const { sstValues, baselineData } = this.prepareChartData(dates, loc);
+            const { events, dateToMeta } = this.detectMarineHeatwavesFromData(dates, sstValues, baselineData);
+            const chip = document.getElementById(`chip-${loc}`);
+            const anom = document.getElementById(`anom-${loc}`);
+            const metaBox = document.getElementById(`meta-${loc}`);
+            if (!chip || !anom || !metaBox) continue;
+            const meta = dateToMeta.get(today);
+            const current = meta ? this.getHeatwaveCategoryLabel(meta.category) : 'No MHW';
+            const currentAnom = meta ? `${meta.anomaly.toFixed(2)}°C` : '—';
+            chip.textContent = current;
+            // Blue when no MHW; warm reds/oranges as severity increases
+            const color = meta && meta.category ? (meta.category>=4?'#b91c1c':meta.category>=3?'#c2410c':meta.category>=2?'#d97706':'#65a30d') : '#2563eb';
+            chip.style.setProperty('color', color);
+            chip.style.setProperty('border-color', color);
+            chip.style.setProperty('background', 'transparent');
+            anom.textContent = currentAnom;
+            const last = events.length ? events[events.length - 1] : null;
+            metaBox.innerHTML = last ? `<div>Recent: ${last.start} → ${last.end}</div><div>Peak +${last.maxAnomaly.toFixed(2)}°C, ${this.getHeatwaveCategoryLabel(last.category)}</div>` : `<div>No recent events</div>`;
+        }
+        // Wire buttons
+        document.querySelectorAll('[data-browse-loc]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const loc = btn.getAttribute('data-browse-loc');
+                this.currentLocation = loc;
+                const select = document.getElementById('location-select');
+                if (select) select.value = loc;
+                document.querySelector('.tab-btn[data-tab="tab-chart"]').click();
+            });
+        });
     }
 }
 
